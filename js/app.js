@@ -1,5 +1,6 @@
-import { makeProblem, evaluate, pipGuess } from './problems.js';
+import { makeProblem, makeBigProblem, evaluate, pipGuess, pipBigGuess } from './problems.js';
 import { createPad } from './draw.js';
+import { pileHTML, expanded, playAdd, playSub } from './blocks.js';
 
 const app = document.getElementById('app');
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -16,10 +17,20 @@ const STICKERS = ['🐱', '⭐', '🌸', '🐦', '🐰', '🐉', '🦉', '🌈',
 const STARTERS = STICKERS.slice(0, 3);
 
 function loadStore() {
-  const fresh = { max: 20, kinds: { end: true, change: true, start: true }, stickers: [...STARTERS], solved: 0 };
+  const fresh = {
+    max: 20,
+    kinds: { end: true, change: true, start: true },
+    big: { add: true, sub: true, three: true },
+    stickers: [...STARTERS],
+    solved: 0,
+  };
   try {
     const saved = JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
-    return { ...fresh, ...saved, kinds: { ...fresh.kinds, ...(saved.kinds || {}) } };
+    return {
+      ...fresh, ...saved,
+      kinds: { ...fresh.kinds, ...(saved.kinds || {}) },
+      big: { ...fresh.big, ...(saved.big || {}) },
+    };
   } catch {
     return fresh;
   }
@@ -37,10 +48,19 @@ const KIND_LABEL = {
   start: ['At the start', '? + 6 = 13'],
 };
 
+const BIG_LABEL = {
+  add: ['Adding', '35 + 35'],
+  sub: ['Taking away', '52 − 27'],
+  three: ['Three numbers', '35 + 35 + 38'],
+};
+const TITLES = { story: '📖 Mystery Stories', big: '🧮 Big Number Stories', pip: '🐲 Check Pip’s Work' };
+const STOP = Symbol('left the screen');
+
 let game = null;
 let lastTheme = null;
 let lastKind = null;
 let played = 0;
+let playedBig = 0;
 let thinkPad = null;
 let studioPad = null;
 let confirmTimer = null;
@@ -48,6 +68,10 @@ let confirmTimer = null;
 const enabledKinds = () => {
   const on = Object.keys(store.kinds).filter(k => store.kinds[k]);
   return on.length ? on : ['end'];
+};
+const enabledBig = () => {
+  const on = Object.keys(store.big).filter(k => store.big[k]);
+  return on.length ? on : ['add'];
 };
 const slotVal = (p, role) => (p.unknown === role ? '?' : p.values[role]);
 
@@ -105,6 +129,11 @@ function renderHome() {
           <span class="mode-name">Mystery Stories</span>
           <span class="mode-sub">Turn a story into a number sentence</span>
         </button>
+        <button class="mode" data-act="play" data-mode="big">
+          <span class="mode-emoji">🧮</span>
+          <span class="mode-name">Big Number Stories</span>
+          <span class="mode-sub">Add and take away with tens and ones</span>
+        </button>
         <button class="mode" data-act="play" data-mode="pip">
           <span class="mode-emoji">🐲</span>
           <span class="mode-name">Check Pip’s Work</span>
@@ -122,7 +151,7 @@ function renderHome() {
 
 // ---------- play: setup ----------
 
-function startGame(mode) {
+function smallProblem(mode) {
   let kinds = enabledKinds();
   let max = store.max;
   if (mode === 'pip') {
@@ -135,22 +164,41 @@ function startGame(mode) {
     kinds = kinds.filter(k => k !== lastKind);
   }
   const p = makeProblem({ max, kinds, avoidTheme: lastTheme });
-  lastTheme = p.theme.id;
   lastKind = p.unknown;
   played++;
+  return p;
+}
 
-  game = { mode, p, phase: 'build', step: 0, filled: {}, guesses: [], pick: null, shown: null, note: '', msg: '', reward: null, rewardChoices: [] };
+function bigProblem(mode) {
+  const on = enabledBig();
+  // The first big story of a sitting is a gentle one: two numbers, no new ten.
+  const easy = mode === 'big' && playedBig === 0 && on.includes('add');
+  playedBig++;
+  return makeBigProblem({ kinds: easy ? ['add'] : on, easy, avoidTheme: lastTheme });
+}
+
+function startGame(mode) {
+  const big = mode === 'big' || (mode === 'pip' && Math.random() < 0.5);
+  const p = big ? bigProblem(mode) : smallProblem(mode);
+  lastTheme = p.theme.id;
+
+  game = {
+    mode, p, phase: big ? 'op' : 'build', step: 0, filled: {}, guesses: [],
+    pick: null, entry: '', shown: null, note: '', msg: '', starter: false, reward: null, rewardChoices: [],
+  };
   if (mode === 'pip') {
     game.phase = 'pip';
-    game.filled = { start: slotVal(p, 'start'), op: SIGN[p.op], change: slotVal(p, 'change'), end: slotVal(p, 'end') };
-    game.pip = pipGuess(p, store.max);
+    game.filled = big
+      ? { op: SIGN[p.op] }
+      : { start: slotVal(p, 'start'), op: SIGN[p.op], change: slotVal(p, 'change'), end: slotVal(p, 'end') };
+    game.pip = big ? pipBigGuess(p) : pipGuess(p, store.max);
   }
 
   app.innerHTML = `
     <div class="play">
       <header class="bar">
         <button class="icon-btn" data-act="home" aria-label="Home">🏠</button>
-        <div class="bar-title">${mode === 'pip' ? '🐲 Check Pip’s Work' : '📖 Mystery Stories'}</div>
+        <div class="bar-title">${TITLES[mode]}</div>
         <button class="chip-btn" data-act="pad" id="padBtn">✏️ Think pad</button>
       </header>
       <section class="card story" id="story"></section>
@@ -193,6 +241,18 @@ function renderStory() {
 
 function renderEquation() {
   const { p, filled, phase, pick } = game;
+  if (p.big) {
+    const op = filled.op
+      ? `<span class="slot op">${filled.op}</span>`
+      : '<span class="slot op empty current"></span>';
+    const trying = game.entry || (pick != null ? String(pick) : '');
+    let result = '<span class="slot mystery">?</span>';
+    if (phase === 'won') result = `<span class="slot solved">${p.answer}</span>`;
+    else if (trying) result = `<span class="slot mystery trying">${trying}</span>`;
+    $('#equation').innerHTML = p.terms.map(n => `<span class="slot">${n}</span>`).join(op)
+      + `<span class="eq-sign">=</span>${result}`;
+    return;
+  }
   const current = phase === 'build' ? STEPS[game.step] : null;
   const num = role => {
     const v = filled[role];
@@ -236,8 +296,195 @@ function stageHTML(v, { after = false, only = null, note = '' } = {}) {
 
 const mysteryValues = p => ({ ...p.values, [p.unknown]: null });
 
+// The sticker choice and the buttons shown after a story is solved.
+function wonTailHTML() {
+  let reward = '';
+  if (game.reward) {
+    reward = `<div class="reward">✨ ${game.reward} is now in your Art Studio!</div>`;
+  } else if (game.rewardChoices.length) {
+    reward = `<div class="reward">Choose a sticker for your Art Studio:
+      <div class="reward-choices">${game.rewardChoices.map(s =>
+        `<button class="sticker-btn" data-act="reward" data-s="${s}">${s}</button>`).join('')}</div></div>`;
+  }
+  return `${reward}
+    <div class="actions">
+      <button class="primary" data-act="next">${game.mode === 'pip' ? 'Help Pip again ▶' : 'Next story ▶'}</button>
+      <button class="secondary" data-act="studio">🎨 Art Studio</button>
+    </div>`;
+}
+
+function win(me) {
+  me.phase = 'won';
+  me.pick = null;
+  me.entry = '';
+  store.solved++;
+  save();
+  me.rewardChoices = shuffle(STICKERS.filter(s => !store.stickers.includes(s))).slice(0, 3);
+  updatePlay();
+  burst(me.p.theme.emoji);
+}
+
+// ---------- play: big numbers ----------
+
+// `result` is what the answer box shows: 'mystery' (still hidden), 'empty'
+// (ready for blocks to be gathered), 'read' (blocks shown, number hidden) or 'won'.
+function bigStageHTML(result, note = '') {
+  const { p } = game;
+  const roles = ['start', 'change', 'third'];
+  const sign = `<div class="sign">${game.filled.op || ''}</div>`;
+  const terms = p.terms.map((n, i) => `
+    <div class="piece blocks ${roles[i]}${p.op === 'sub' && i === 1 ? ' away' : ''}" data-term="${i}">
+      ${pileHTML(n)}
+      <div class="label">${n}<small>${expanded(n)}</small></div>
+    </div>`).join(sign);
+  let end;
+  if (result === 'mystery') {
+    end = '<div class="piece mystery"><div class="box">🎁</div><div class="label">?</div></div>';
+  } else if (result === 'won') {
+    end = `<div class="piece blocks end">${pileHTML(p.answer, p.carries)}<div class="label">${p.answer}<small>${expanded(p.answer)}</small></div></div>`;
+  } else {
+    end = `<div class="piece blocks end guess" data-result>${result === 'read' ? pileHTML(p.answer, p.carries) : pileHTML(0)}<div class="label">?</div></div>`;
+  }
+  return `${terms}<div class="sign">=</div>${end}<div class="counter" id="counter">${note}</div>`;
+}
+
+function starterText(p) {
+  if (p.op === 'add') {
+    const tens = p.terms.map(n => n - n % 10).join(' + ');
+    const ones = p.terms.map(n => n % 10).join(' + ');
+    return `Try the tens first: ${tens}. Then the ones: ${ones}. Then put those two answers together.`;
+  }
+  const [s, d] = p.terms;
+  return `Start at ${s}. Take away the tens first: ${s} − ${d - d % 10}. Then take away ${d % 10} more.`;
+}
+
+function renderBigWork() {
+  const { p, phase } = game;
+  const w = $('#work');
+
+  if (phase === 'op') {
+    w.innerHTML = `
+      <div class="stage" id="stage">${bigStageHTML('mystery')}</div>
+      <div class="prompt"><span class="step">Read the story first</span>What is happening in this story?</div>
+      <div class="choices">
+        <button class="choice" data-act="choose" data-v="+">+<small>putting together</small></button>
+        <button class="choice" data-act="choose" data-v="−">−<small>taking away</small></button>
+      </div>
+      <div class="hint" id="hint"></div>`;
+    return;
+  }
+
+  if (phase === 'pip') {
+    w.innerHTML = `
+      <div class="stage" id="stage">${bigStageHTML('mystery')}</div>
+      <div class="pip">
+        <div class="pip-face">🐲</div>
+        <div class="bubble">“I think the answer is <b>${game.pip}</b>!”</div>
+      </div>
+      <div class="verdict">Is Pip right? You don’t have to know yet. Test it with the blocks!</div>
+      <div class="actions"><button class="primary" data-act="test-pip">Test Pip’s answer ▶</button></div>`;
+    return;
+  }
+
+  if (phase === 'guess' || phase === 'testing') {
+    const tried = game.guesses.map(x => `<span class="clue">${x.who === 'pip' ? '🐲 ' : ''}${x.g}</span>`).join('');
+    const keys = [1, 2, 3, 4, 5, 6, 7, 8, 9, 0].map(d => `<button class="num" data-act="key" data-k="${d}">${d}</button>`).join('');
+    const opening = 'What number goes in the mystery box? Work it out, then test it with the blocks.';
+    w.innerHTML = `
+      <div class="stage" id="stage">${bigStageHTML(game.shown ? 'read' : 'mystery', game.shown ? 'Read the blocks!' : '')}</div>
+      <div class="verdict" id="verdict">${game.msg || opening}</div>
+      ${game.starter ? `<div class="starter">💡 ${starterText(p)}</div>` : ''}
+      <div class="keypad">${keys}<button class="num erase" data-act="key" data-k="back" aria-label="Erase">⌫</button></div>
+      <div class="actions">
+        <button class="primary" data-act="test"${game.entry ? '' : ' disabled'}>Test it ▶</button>
+        ${game.starter || game.shown ? '' : '<button class="secondary" data-act="starter">💡 How could I start?</button>'}
+      </div>
+      ${tried ? `<div class="log"><span>Tried so far:</span>${tried}</div>` : ''}`;
+    return;
+  }
+
+  if (phase === 'won') {
+    const n = game.guesses.length;
+    let praise;
+    if (game.guesses[n - 1].who === 'pip') praise = 'Pip was right, and you proved it by testing!';
+    else if (game.mode === 'pip') praise = 'You found Pip’s slip and fixed it!';
+    else if (n === 1) praise = 'You worked it out and checked it with the blocks.';
+    else praise = `It took ${n} tries, and each one taught you something. That’s how mathematicians work!`;
+    const sentence = `${p.terms.join(` ${SIGN[p.op]} `)} = ${p.answer}`;
+    w.innerHTML = `
+      <div class="stage" id="stage">${bigStageHTML('won', sentence)}</div>
+      <div class="verdict win">🎉 It matches the blocks! ${praise}</div>
+      ${wonTailHTML()}`;
+  }
+}
+
+async function runBigTest(g, who) {
+  const me = game;
+  const { p } = me;
+  const correct = g === p.answer;
+
+  // The blocks are already on the table: no need to play it again, just compare.
+  if (me.shown) {
+    me.guesses.push({ g, who });
+    if (correct) { win(me); return; }
+    me.entry = '';
+    me.msg = `The blocks don’t say ${g}. Count the tall ten-sticks by tens, then count on with the little ones.`
+      + (p.answer >= 100 ? ' The big square is 100.' : '');
+    updatePlay();
+    return;
+  }
+
+  me.phase = 'testing';
+  me.pick = g;
+  me.entry = '';
+  renderEquation();
+  $$('#work button').forEach(b => { b.disabled = true; });
+  const verdict = $('.verdict');
+  if (verdict) verdict.textContent = 'Let’s play the story with blocks and see…';
+  const stage = $('#stage');
+  stage.innerHTML = bigStageHTML('empty');
+  stage.scrollIntoView({ block: 'nearest', behavior: calm ? 'auto' : 'smooth' });
+  const counter = $('#counter');
+  const say = text => { counter.textContent = text; };
+  const pause = async ms => {
+    if (!calm) await sleep(ms);
+    if (game !== me || !stage.isConnected) throw STOP;
+  };
+
+  try {
+    await pause(700);
+    const target = $('[data-result]', stage);
+    if (p.op === 'add') await playAdd($$('[data-term]', stage), target, { say, pause });
+    else await playSub($('[data-term="0"]', stage), target, p.terms[1], { say, pause });
+    await pause(600);
+  } catch (err) {
+    if (err === STOP) return;
+    throw err;
+  }
+
+  me.guesses.push({ g, who });
+  if (correct) { win(me); return; }
+
+  let msg = who === 'pip'
+    ? `Pip said ${g}. Now read the blocks. What should Pip have said?`
+    : `You predicted ${g}. Now read the blocks: how many tens, and how many ones?`;
+  if (p.op === 'add' && p.carries && g === p.answer - 10 * p.carries) {
+    msg += ' <span class="nudge">Did you spot the new ten that the ones made?</span>';
+  } else if (p.op === 'sub' && p.regroup && g === p.answer + 10) {
+    msg += ' <span class="nudge">Did you spot the ten we had to open?</span>';
+  }
+  me.phase = 'guess';
+  me.pick = null;
+  me.shown = true;
+  me.msg = msg;
+  updatePlay();
+}
+
+// ---------- play: small numbers ----------
+
 function renderWork() {
   const { p, phase } = game;
+  if (p.big) { renderBigWork(); return; }
   const m = p.theme.many;
   const w = $('#work');
 
@@ -316,22 +563,10 @@ function renderWork() {
     else if (n === 1) praise = 'You found the mystery number and checked it with the story.';
     else praise = `You used ${n} clues to find the mystery number. That’s how mathematicians work!`;
 
-    let reward = '';
-    if (game.reward) {
-      reward = `<div class="reward">✨ ${game.reward} is now in your Art Studio!</div>`;
-    } else if (game.rewardChoices.length) {
-      reward = `<div class="reward">Choose a sticker for your Art Studio:
-        <div class="reward-choices">${game.rewardChoices.map(s =>
-          `<button class="sticker-btn" data-act="reward" data-s="${s}">${s}</button>`).join('')}</div></div>`;
-    }
     w.innerHTML = `
       <div class="stage" id="stage">${stageHTML(v, { after: true, note: sentence })}</div>
       <div class="verdict win">🎉 It matches the story! ${praise}</div>
-      ${reward}
-      <div class="actions">
-        <button class="primary" data-act="next">${game.mode === 'pip' ? 'Help Pip again ▶' : 'Next story ▶'}</button>
-        <button class="secondary" data-act="studio">🎨 Art Studio</button>
-      </div>`;
+      ${wonTailHTML()}`;
   }
 }
 
@@ -387,16 +622,7 @@ async function runTest(g, who) {
 
   me.guesses.push({ g, made: r.made, impossible: r.impossible, who });
 
-  if (r.correct) {
-    me.phase = 'won';
-    me.pick = null;
-    store.solved++;
-    save();
-    me.rewardChoices = shuffle(STICKERS.filter(s => !store.stickers.includes(s))).slice(0, 3);
-    updatePlay();
-    burst(p.theme.emoji);
-    return;
-  }
+  if (r.correct) { win(me); return; }
 
   let msg;
   if (r.impossible) {
@@ -500,9 +726,20 @@ function renderGrownups() {
         <p class="fine">“At the start” is the hardest kind. The first story of each sitting is always an easy warm-up.</p>
       </section>
       <section class="card">
+        <h2>Big Number Stories</h2>
+        <div class="toggle-row">
+          ${Object.entries(BIG_LABEL).map(([k, [name, eg]]) =>
+            `<button class="toggle${store.big[k] ? ' on' : ''}" data-act="set-big" data-k="${k}">${name}<small>${eg}</small></button>`).join('')}
+        </div>
+        <p class="fine">Most of these need a trade: ten ones become a ten, or a ten is opened into ones. Three numbers can go past 100.</p>
+      </section>
+      <section class="card">
         <h2>Paper practice</h2>
-        <p>Six stories on one page, with room to draw and the same number-sentence frame the app uses.</p>
-        <button class="secondary" data-act="sheet">Make a worksheet</button>
+        <p>Six stories on one page, with room to draw and write the number sentence.</p>
+        <div class="toggle-row">
+          <button class="secondary" data-act="sheet" data-kind="small">Mystery worksheet</button>
+          <button class="secondary" data-act="sheet" data-kind="big">Big number worksheet</button>
+        </div>
       </section>
       <section class="card">
         <h2>Sitting alongside</h2>
@@ -520,36 +757,45 @@ function renderGrownups() {
     </div>`;
 }
 
-function renderSheet() {
+function renderSheet(kind = 'small') {
   game = null;
-  const kinds = enabledKinds();
+  const big = kind === 'big';
+  const kinds = big ? enabledBig() : enabledKinds();
   let theme = null;
   const problems = Array.from({ length: 6 }, (_, i) => {
-    const p = makeProblem({ max: store.max, kinds: [kinds[i % kinds.length]], avoidTheme: theme });
+    const only = [kinds[i % kinds.length]];
+    const p = big
+      ? makeBigProblem({ kinds: only, avoidTheme: theme })
+      : makeProblem({ max: store.max, kinds: only, avoidTheme: theme });
     theme = p.theme.id;
     return p;
   });
+  const how = big
+    ? 'Draw tens and ones, or use a number line. Write the number sentence. Then test your answer a second way!'
+    : 'Draw the story. Put a ? box where the mystery number hides. Write the number sentence. Then test your answer with the story!';
+  const frame = big
+    ? '<div class="sheet-line">Number sentence <span></span></div><div class="sheet-check"><span></span> I checked the ones for a trade.</div>'
+    : '<div class="sheet-eq"><i></i><b></b><i></i><em>=</em><i></i></div><div class="sheet-check"><span></span> I tested my answer with the story.</div>';
   app.innerHTML = `
     <div class="sheet-view">
       <header class="bar no-print">
         <button class="icon-btn" data-act="grownups" aria-label="Back">←</button>
         <div class="bar-title">Worksheet</div>
-        <button class="chip-btn" data-act="sheet">New stories</button>
+        <button class="chip-btn" data-act="sheet" data-kind="${kind}">New stories</button>
         <button class="chip-btn on" data-act="print">Print</button>
       </header>
       <div class="sheet">
         <div class="sheet-head">
-          <h1>🎁 Mystery Box Stories</h1>
+          <h1>${big ? '🧮 Big Number Stories' : '🎁 Mystery Box Stories'}</h1>
           <div>Name ____________________</div>
         </div>
-        <p class="sheet-how">Draw the story. Put a ? box where the mystery number hides. Write the number sentence. Then test your answer with the story!</p>
+        <p class="sheet-how">${how}</p>
         <ol class="sheet-grid">
           ${problems.map(p => `
             <li>
               <p class="sheet-story">${p.theme.emoji} ${p.sentences.map(s => s.text).join(' ')} ${p.question || ''}</p>
               <div class="sheet-draw"></div>
-              <div class="sheet-eq"><i></i><b></b><i></i><em>=</em><i></i></div>
-              <div class="sheet-check"><span></span> I tested my answer with the story.</div>
+              ${frame}
             </li>`).join('')}
         </ol>
       </div>
@@ -562,7 +808,7 @@ const actions = {
   home: renderHome,
   studio: renderStudio,
   grownups: renderGrownups,
-  sheet: renderSheet,
+  sheet: b => renderSheet(b.dataset.kind),
   print: () => window.print(),
   play: b => startGame(b.dataset.mode),
   next: () => startGame(game.mode),
@@ -586,6 +832,19 @@ const actions = {
 
   choose(b) {
     const { p } = game;
+    if (p.big) {
+      if (b.dataset.v === SIGN[p.op]) {
+        game.filled.op = SIGN[p.op];
+        game.phase = 'guess';
+        updatePlay();
+        return;
+      }
+      $('#hint').textContent = 'Read the story once more. Are things being put together, or taken away?';
+      b.classList.remove('shake');
+      void b.offsetWidth;
+      b.classList.add('shake');
+      return;
+    }
     const step = STEPS[game.step];
     const want = step === 'op' ? SIGN[p.op] : slotVal(p, step);
     const got = b.dataset.v;
@@ -618,11 +877,31 @@ const actions = {
     renderEquation();
     renderWork();
   },
+  key(b) {
+    if (game.phase !== 'guess' || !game.p.big) return;
+    const k = b.dataset.k;
+    if (k === 'back') game.entry = game.entry.slice(0, -1);
+    else if (game.entry.length < 3) game.entry = (game.entry === '0' ? '' : game.entry) + k;
+    renderEquation();
+    const test = $('[data-act="test"]');
+    if (test) test.disabled = !game.entry;
+  },
+  starter() {
+    game.starter = true;
+    renderWork();
+  },
   test() {
-    if (game.phase === 'guess' && game.pick != null) runTest(game.pick, 'you');
+    if (game.phase !== 'guess') return;
+    if (game.p.big) {
+      if (game.entry) runBigTest(Number(game.entry), 'you');
+    } else if (game.pick != null) {
+      runTest(game.pick, 'you');
+    }
   },
   'test-pip'() {
-    if (game.phase === 'pip') runTest(game.pip, 'pip');
+    if (game.phase !== 'pip') return;
+    if (game.p.big) runBigTest(game.pip, 'pip');
+    else runTest(game.pip, 'pip');
   },
   reward(b) {
     const s = b.dataset.s;
@@ -651,6 +930,13 @@ const actions = {
     const on = enabledKinds();
     if (store.kinds[k] && on.length === 1) return; // keep at least one kind
     store.kinds[k] = !store.kinds[k];
+    save();
+    renderGrownups();
+  },
+  'set-big'(b) {
+    const k = b.dataset.k;
+    if (store.big[k] && enabledBig().length === 1) return; // keep at least one kind
+    store.big[k] = !store.big[k];
     save();
     renderGrownups();
   },

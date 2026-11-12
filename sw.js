@@ -1,6 +1,6 @@
 // Offline support. Network first, so a new version shows up as soon as the
 // iPad is online; the cached copy is used when it is not.
-const CACHE = 'mysterybox-v1';
+const CACHE = 'mysterybox-v2';
 const SHELL = [
   './',
   'index.html',
@@ -8,6 +8,7 @@ const SHELL = [
   'js/app.js',
   'js/problems.js',
   'js/draw.js',
+  'js/blocks.js',
   'manifest.webmanifest',
   'icons/icon.svg',
   'icons/icon-192.png',

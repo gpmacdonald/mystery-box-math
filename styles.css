@@ -77,7 +77,8 @@ h1, h2, p { margin: 0; }
 .hero-box { font-size: 84px; line-height: 1; animation: bob 3s ease-in-out infinite; }
 .hero h1 { font-size: clamp(34px, 6vw, 52px); font-weight: 900; margin: 8px 0; text-wrap: balance; }
 .hero p { font-size: 21px; color: var(--muted); }
-.modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 32px; }
+.modes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin: 32px auto 0; max-width: 720px; }
+@media (max-width: 520px) { .modes { grid-template-columns: 1fr; } }
 .mode {
   background: var(--card); border: 3px solid var(--line); border-radius: 24px; padding: 22px 16px;
   display: flex; flex-direction: column; align-items: center; gap: 4px; box-shadow: 0 6px 0 var(--line);
@@ -140,6 +141,40 @@ h1, h2, p { margin: 0; }
 .sign { font-size: 32px; font-weight: 800; width: 26px; text-align: center; align-self: center; }
 .counter { flex-basis: 100%; text-align: center; font-size: 26px; font-weight: 800; color: var(--primary-deep); min-height: 36px; }
 @keyframes pop { from { transform: scale(.4); opacity: 0; } }
+
+/* ---------- base-ten blocks ---------- */
+
+.piece.blocks { min-width: 0; padding: 10px 14px 6px; }
+.piece.third { background: #f3dcf2; }
+.piece.away .pile { opacity: .45; }
+.label small { display: block; font-size: 14px; font-weight: 600; color: var(--muted); text-align: center; }
+.pile { display: flex; align-items: flex-end; gap: 8px; min-height: 110px; min-width: 60px; justify-content: center; }
+.pile i { display: block; transition: opacity .3s; }
+.z { display: flex; align-items: flex-end; gap: 3px; }
+.z:empty { display: none; }
+/* Flipped so the ones stack up from the floor, like the rods. */
+.z-ones { display: grid; grid-template-rows: repeat(5, 11px); grid-auto-flow: column; gap: 3px; transform: scaleY(-1); }
+.rod { width: 11px; height: 110px; border-radius: 3px; background: repeating-linear-gradient(to bottom, #2fae9a 0 10px, #1c8a79 10px 11px); }
+.rod.new { background: repeating-linear-gradient(to bottom, #f2b233 0 10px, #c98a0c 10px 11px); }
+.one { width: 11px; height: 11px; border-radius: 3px; background: #f2b233; box-shadow: inset 0 0 0 1px #c98a0c; }
+.flat {
+  width: 110px; height: 110px; border-radius: 4px;
+  background:
+    repeating-linear-gradient(to bottom, transparent 0 10px, #3d6fd1 10px 11px),
+    repeating-linear-gradient(to right, #6f9cf0 0 10px, #3d6fd1 10px 11px);
+}
+.pile .moved { opacity: .22; }
+.pile .gone { opacity: .22; filter: grayscale(1); }
+.pile .glow { box-shadow: 0 0 0 2px #fff, 0 0 0 4px #e0a100, 0 0 10px 4px #ffbf3c; }
+.pile .pop { animation: pop .3s backwards; }
+
+.keypad { display: grid; grid-template-columns: repeat(5, 1fr) 1.2fr; gap: 8px; max-width: 520px; margin: 0 auto; }
+.keypad .num { height: 58px; font-size: 26px; }
+.keypad .erase { grid-column: 6; grid-row: 1 / span 2; height: auto; background: var(--amber-soft); }
+.starter {
+  margin: 0 0 12px; padding: 12px 16px; border-radius: 16px; background: var(--primary-soft);
+  color: var(--primary-deep); font-size: 19px; font-weight: 700; text-align: center; text-wrap: balance;
+}
 
 /* ---------- building the number sentence ---------- */
 
@@ -248,6 +283,8 @@ canvas { display: block; width: 100%; background: #fff; border-radius: 14px; bor
 .sheet-eq i { width: 46px; height: 42px; border: 2px solid var(--ink); border-radius: 8px; }
 .sheet-eq b { width: 34px; height: 34px; border: 2px solid var(--ink); border-radius: 50%; }
 .sheet-eq em { font-style: normal; font-weight: 800; font-size: 24px; }
+.sheet-line { display: flex; align-items: flex-end; gap: 8px; font-size: 14px; font-weight: 700; margin-top: 14px; }
+.sheet-line span { flex: 1; border-bottom: 2px solid var(--ink); height: 24px; }
 .sheet-check { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-top: 8px; }
 .sheet-check span { width: 16px; height: 16px; border: 2px solid var(--ink); border-radius: 4px; flex: none; }
 
