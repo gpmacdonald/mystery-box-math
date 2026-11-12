@@ -1,0 +1,14 @@
+{
+  "name": "Mystery Box Math",
+  "short_name": "Mystery Box",
+  "description": "Story problems where every guess is a clue.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fdf6e9",
+  "theme_color": "#6c4bd8",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
